@@ -1,0 +1,41 @@
+===============================================
+热传导反演求解器 - 快速参考卡片
+===============================================
+
+边界条件类型:
+0 - 定壁温           需要: 温度(°C)
+1 - 时变定壁温       需要: 无额外参数
+2 - 定热流           需要: 热流(W/m²)
+3 - 对流换热         需要: 环境温度(°C), 换热系数(W/m²·K)
+4 - 对流+辐射        需要: 环境温度(°C), 换热系数(W/m²·K), 发射率(0-1)
+
+求解模式:
+0 - 导热计算         正向求解温度场
+1 - 物性反演         反演热导率和比热
+
+可用算法索引:
+0 - genetic_algorithm (遗传算法)
+1 - particle_swarm (粒子群优化)
+2 - cma_es (CMA-ES标准版)
+3 - cma_es_large (CMA-ES大种群)
+4 - cma_es_small (CMA-ES小种群)
+5 - Ceres_optimization (Ceres优化)
+
+算法选择建议:
+首次使用: genetic_algorithm
+快速验证: Ceres_optimization
+高精度: cma_es_large
+多峰问题: genetic_algorithm
+
+配置文件位置:
+单层: config/single_layer_config.txt
+多层: config/multi_layer_config.txt
+
+运行命令:
+./build/bin/singleLayerInverse [config_file]
+./build/bin/multiLayerInverse [config_file]
+
+单位制:
+长度: m, 时间: s, 温度: °C
+热导率: W/m·K, 比热: J/kg·K, 密度: kg/m³
+===============================================

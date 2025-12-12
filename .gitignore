@@ -1,0 +1,97 @@
+# 构建目录
+build/
+Build/
+cmake-build-*/
+out/
+dist/
+
+# 可执行文件和库
+*.exe
+*.dll
+*.so
+*.a
+*.lib
+*.o
+*.obj
+
+# CMake
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+*.cmake
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+*.user
+*.pro.user
+
+# 编译输出
+*.o
+*.a
+*.so
+*.dylib
+*.dll
+*.exe
+
+# 调试文件
+*.dSYM/
+*.su
+*.gch
+*.pch
+
+# 临时文件
+*.tmp
+*.temp
+*.bak
+*.backup
+*~
+
+# 日志文件
+*.log
+*.out
+
+# 系统文件
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# 测试覆盖率
+.coverage
+htmlcov/
+
+# 依赖
+vcpkg_installed/
+conan/
+
+# 其他
+*.orig
+*.rej

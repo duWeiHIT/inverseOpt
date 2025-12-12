@@ -1,0 +1,79 @@
+# 多层材料反演求解器配置文件
+# 注释行以#开头
+
+# 层数
+LAYER_COUNT 3                  # 材料层数
+
+# 第1层材料
+LAYER1_NAME "Material1"        # 材料名称
+LAYER1_THICKNESS 0.003         # 厚度(m)
+LAYER1_NODES 31                # 离散点数
+LAYER1_DENSITY 7800.0          # 密度(kg/m^3)
+LAYER1_DATA_START
+25.0  50.0  500.0             # 温度(°C) 热导率(W/m/K) 比热(J/kg/K)
+100.0 45.0  520.0
+200.0 40.0  550.0
+LAYER1_DATA_END
+
+# 第2层材料
+LAYER2_NAME "Material2"        # 材料名称
+LAYER2_THICKNESS 0.004         # 厚度(m)
+LAYER2_NODES 41                # 离散点数
+LAYER2_DENSITY 2700.0          # 密度(kg/m^3)
+LAYER2_DATA_START
+25.0  200.0  900.0             # 温度(°C) 热导率(W/m/K) 比热(J/kg/K)
+100.0 210.0  920.0
+200.0 220.0  950.0
+LAYER2_DATA_END
+
+# 第3层材料
+LAYER3_NAME "Material3"        # 材料名称
+LAYER3_THICKNESS 0.003         # 厚度(m)
+LAYER3_NODES 31                # 离散点数
+LAYER3_DENSITY 8900.0          # 密度(kg/m^3)
+LAYER3_DATA_START
+25.0  400.0  380.0             # 温度(°C) 热导率(W/m/K) 比热(J/kg/K)
+100.0 410.0  390.0
+200.0 420.0  400.0
+LAYER3_DATA_END
+
+# 边界条件 (0:定壁温 1:时变定壁温 2:定热流 3:对流换热 4:对流换热+辐射)
+LEFT_BC_TYPE 0                 # 左侧边界条件类型
+LEFT_BC_VALUE1 100.0           # 左侧边界参数1(温度/热流/环境温度)
+LEFT_BC_VALUE2 0.0             # 左侧边界参数2(换热系数)
+LEFT_BC_VALUE3 0.0             # 左侧边界参数3(发射率)
+
+RIGHT_BC_TYPE 3                # 右侧边界条件类型
+RIGHT_BC_VALUE1 25.0           # 右侧边界参数1
+RIGHT_BC_VALUE2 10.0           # 右侧边界参数2
+RIGHT_BC_VALUE3 0.0            # 右侧边界参数3
+
+# 时间参数
+TIME_STEP 0.5                  # 时间步长(s)
+INITIAL_TEMP 25.0              # 初始温度(°C)
+
+# 求解模式 (0:导热计算 1:物性反演)
+SOLVE_MODE 1                   # 求解模式
+DURATION 100.0                  # 导热计算时间(s) - 仅mode=0时使用
+
+# 反演参数 - 仅mode=1时使用
+MEASUREMENT_FILE "/home/dw/Opt/measurement.txt"  # 温度测量文件
+MEASURE_POSITION 0.005         # 测点位置(m)
+MEASURE_POINT_INDEX 1          # 测点编号(0=T0, 1=T1, 2=T2)
+SAMPLE_INDEX 0                 # 待反演样件编号
+ALGORITHM_INDEX 1              # 反演算法索引
+USE_DEFAULT_CONFIG true        # 是否使用默认算法配置
+
+# 参数边界约束
+K_LOWER_BOUND 10.0             # 热导率下界(W/m/K)
+K_UPPER_BOUND 500.0            # 热导率上界(W/m/K)
+CP_LOWER_BOUND 300.0           # 比热下界(J/kg/K)
+CP_UPPER_BOUND 1000.0          # 比热上界(J/kg/K)
+
+# 输出参数 - 仅mode=0时使用
+OUTPUT_FILE "temperature_output.txt"  # 温度输出文件
+MONITOR_COUNT 3                # 监测点数量
+MONITOR_POSITION1 0.002        # 监测点1位置(m)
+MONITOR_POSITION2 0.005        # 监测点2位置(m)
+MONITOR_POSITION3 0.008        # 监测点3位置(m)
+OUTPUT_INTERVAL 2              # 输出间隔(每n个时间步输出一次)

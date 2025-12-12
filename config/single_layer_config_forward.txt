@@ -1,0 +1,71 @@
+# 单层材料反演求解器配置文件
+# 注释行以#开头
+
+# 几何参数
+LENGTH 0.03                    # 样件长度(m)
+NODES 301                       # 离散单元数目
+
+# 边界条件 (0:定壁温 1:时变定壁温 2:定热流 3:对流换热 4:对流换热+辐射)
+LEFT_BC_TYPE 0                 # 左侧边界条件类型
+LEFT_BC_VALUE1 500.0           # 左侧边界参数1(温度/热流/环境温度)
+LEFT_BC_VALUE2 0.0             # 左侧边界参数2(换热系数)
+LEFT_BC_VALUE3 0.0             # 左侧边界参数3(发射率)
+
+RIGHT_BC_TYPE 3                # 右侧边界条件类型
+RIGHT_BC_VALUE1 25.0           # 右侧边界参数1
+RIGHT_BC_VALUE2 50.0           # 右侧边界参数2
+RIGHT_BC_VALUE3 0.0            # 右侧边界参数3
+
+# 材料属性
+DENSITY 3600.0                 # 密度(kg/m^3)
+
+# 温度-热导率-比热数据 (温度(°C) 热导率(W/m/K) 比热(J/kg/K))
+MATERIAL_DATA_START
+25	50	500
+50	52	510
+100	54	520
+150	56	530
+200	58	540
+250	59	545
+350	60	550
+400	61	555
+450	62	560
+500	63	565
+550	63	565
+MATERIAL_DATA_END
+
+# 时间参数
+TIME_STEP 0.5                  # 时间步长(s)
+INITIAL_TEMP 25.0              # 初始温度(°C)
+
+# 求解模式 (0:导热计算 1:物性反演)
+SOLVE_MODE 0                   # 求解模式
+DURATION 300.0                  # 导热计算时间(s) - 仅mode=0时使用
+
+# 反演参数 - 仅mode=1时使用
+MEASUREMENT_FILE "measurement.txt"  # 温度测量文件
+INVERSION_MODE 1               # 反演模式: 0=同时反演热导率和比热, 1=仅反演热导率
+MEASURE_POINT_COUNT 2          # 测点数量
+MEASURE_POSITION1 0.015        # 测点1位置(m)
+MEASURE_POINT_INDEX1 1         # 测点1编号(0=T0, 1=T1, 2=T2)
+MEASURE_POSITION2 0.02         # 测点1位置(m)
+MEASURE_POINT_INDEX2 2         # 测点1编号(0=T0, 1=T1, 2=T2)
+ALGORITHM_INDEX 1              # 反演算法索引 (0=Ceres优化-默认推荐)
+USE_DEFAULT_CONFIG true        # 是否使用默认算法配置
+
+# 参数边界约束 - 根据物理意义缩小范围
+K_LOWER_BOUND 10.0             # 热导率下界(W/m/K)
+K_UPPER_BOUND 100.0            # 热导率上界(W/m/K)
+CP_LOWER_BOUND 300.0           # 比热下界(J/kg/K)
+CP_UPPER_BOUND 1000.0          # 比热上界(J/kg/K)
+
+# 正则化参数 - 用于约束解的光滑性
+REGULARIZATION_LAMBDA 0.005     # Tikhonov正则化参数(0=无正则化, 推荐0.001-0.1)
+
+# 输出参数 - 仅mode=0时使用
+OUTPUT_FILE "temperature_output.txt"  # 温度输出文件
+MONITOR_COUNT 3                # 监测点数量
+MONITOR_POSITION1 0.005        # 监测点1位置(m)
+MONITOR_POSITION2 0.015        # 监测点2位置(m)
+MONITOR_POSITION3 0.025        # 监测点3位置(m)
+OUTPUT_INTERVAL 2              # 输出间隔(每n个时间步输出一次)
