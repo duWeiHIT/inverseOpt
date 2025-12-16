@@ -25,9 +25,7 @@ std::vector<std::vector<double>> readLayerDataFromConfig(const std::string& file
             while (iss >> value) {
                 row.push_back(value);
             }
-            if (row.size() == 3) {
-                data.push_back(row);
-            }
+            data.push_back(row);
         }
     }
     return data;
@@ -46,6 +44,35 @@ int main(int argc, char* argv[])
         if (!config.loadConfig(config_file)) {
             std::cerr << "配置文件加载失败" << std::endl;
             return 1;
+        }
+
+        radiationModel radModel;
+        switch(config.getInt("RADIATION_MODEL")) 
+        {
+            case 0: 
+            {
+                std::cout << "辐射模型: 无辐射" << std::endl;
+                radModel = radiationModel::NONE;
+                break;
+            }
+            case 1: 
+            {
+                std::cout << "辐射模型: 离散坐标" << std::endl;
+                radModel = radiationModel::DISCRETE_ORDINATE_METHOD;
+                break;
+            }
+            case 2: 
+            {
+                std::cout << "辐射模型: Rosseland近似" << std::endl;
+                radModel = radiationModel::ROSSELAND;
+                break;
+            }
+            default :
+            {
+                std::cerr << "未知的辐射模型类型，使用默认的无辐射模型" << std::endl;
+                radModel = radiationModel::NONE;
+                break;
+            }
         }
         
         int layer_count = config.getInt("LAYER_COUNT");
@@ -73,47 +100,119 @@ int main(int argc, char* argv[])
             std::vector<double> Temperature(T_num);
             std::vector<double> kappa(T_num);
             std::vector<double> cp(T_num);
+            std::vector<double> extinction(T_num);
+            std::vector<double> albedo(T_num);
             
             for(int j = 0; j < T_num; j++) 
             {
                 Temperature[j] = material_data[j][0];
                 kappa[j] = material_data[j][1];
                 cp[j] = material_data[j][2];
+                if(radModel != radiationModel::NONE)
+                {
+                    extinction[j] = material_data[j][3];
+                    
+                    if(radModel == radiationModel::DISCRETE_ORDINATE_METHOD)
+                    {
+                        albedo[j] = material_data[j][4];
+                    }
+                }
             }
             
             layers[i].thermal_conductivity.setData(Temperature, kappa);
             layers[i].specific_heat.setData(Temperature, cp);
+            if(radModel != radiationModel::NONE)
+            {
+                layers[i].extinction.setData(Temperature, extinction);
+                layers[i].setRefractiveIndex(config.getDouble(prefix + "REFRACTIVE_INDEX"));
+                if(radModel == radiationModel::DISCRETE_ORDINATE_METHOD)
+                {
+                    layers[i].albedo.setData(Temperature, albedo);
+                }
+            }
         }
-        
-        // 边界条件
+
         BoundaryCondition left_bc, right_bc;
-        
-        int left_type = config.getInt("LEFT_BC_TYPE");
-        left_bc.value1 = config.getDouble("LEFT_BC_VALUE1");
-        left_bc.value2 = config.getDouble("LEFT_BC_VALUE2");
-        left_bc.value3 = config.getDouble("LEFT_BC_VALUE3");
-        
-        switch(left_type) 
+
+        // 从配置文件读取边界条件
+        switch(config.getInt("LEFT_BC_TYPE")) 
         {
-            case 0: left_bc.type = BoundaryType::FIXED_TEMPERATURE; break;
-            case 1: left_bc.type = BoundaryType::TIME_VARY_FIXED_TEMPERATURE; break;
-            case 2: left_bc.type = BoundaryType::FIXED_HEAT_FLUX; break;
-            case 3: left_bc.type = BoundaryType::CONVECTION; break;
-            case 4: left_bc.type = BoundaryType::CONVECTION_RADIATION; break;
+            case 0: 
+            {
+                left_bc.type = BoundaryType::FIXED_TEMPERATURE;
+                left_bc.value1 = config.getDouble("LEFT_BC_VALUE1"); 
+                break;
+            }
+            case 1: 
+            {
+                left_bc.type = BoundaryType::TIME_VARY_FIXED_TEMPERATURE; 
+                left_bc.value1 = config.getDouble("LEFT_BC_VALUE1");
+                break;
+            }
+            case 2: 
+            {
+                left_bc.type = BoundaryType::FIXED_HEAT_FLUX;
+                left_bc.value1 = config.getDouble("LEFT_BC_VALUE1"); 
+                break;
+            }
+            case 3: 
+            {
+                left_bc.type = BoundaryType::CONVECTION;
+                left_bc.value1 = config.getDouble("LEFT_BC_VALUE1");
+                left_bc.value2 = config.getDouble("LEFT_BC_VALUE2"); 
+                break;
+            }
+            case 4: 
+            {
+                left_bc.type = BoundaryType::CONVECTION_RADIATION; 
+                left_bc.value1 = config.getDouble("LEFT_BC_VALUE1");
+                left_bc.value2 = config.getDouble("LEFT_BC_VALUE2");
+                left_bc.value3 = config.getDouble("LEFT_BC_VALUE3");
+                break;
+            }
         }
         
-        int right_type = config.getInt("RIGHT_BC_TYPE");
-        right_bc.value1 = config.getDouble("RIGHT_BC_VALUE1");
-        right_bc.value2 = config.getDouble("RIGHT_BC_VALUE2");
-        right_bc.value3 = config.getDouble("RIGHT_BC_VALUE3");
-        
-        switch(right_type) 
+        switch(config.getInt("RIGHT_BC_TYPE")) 
         {
-            case 0: right_bc.type = BoundaryType::FIXED_TEMPERATURE; break;
-            case 1: right_bc.type = BoundaryType::TIME_VARY_FIXED_TEMPERATURE; break;
-            case 2: right_bc.type = BoundaryType::FIXED_HEAT_FLUX; break;
-            case 3: right_bc.type = BoundaryType::CONVECTION; break;
-            case 4: right_bc.type = BoundaryType::CONVECTION_RADIATION; break;
+            case 0: 
+            {
+                right_bc.type = BoundaryType::FIXED_TEMPERATURE;
+                right_bc.value1 = config.getDouble("RIGHT_BC_VALUE1");
+                break;
+            }
+            case 1: 
+            {
+                right_bc.type = BoundaryType::TIME_VARY_FIXED_TEMPERATURE;
+                right_bc.value1 = config.getDouble("RIGHT_BC_VALUE1");
+                break;
+            }
+            case 2: 
+            {
+                right_bc.type = BoundaryType::FIXED_HEAT_FLUX;
+                right_bc.value1 = config.getDouble("RIGHT_BC_VALUE1"); 
+                break;
+            }
+            case 3: 
+            {
+                right_bc.type = BoundaryType::CONVECTION; 
+                right_bc.value1 = config.getDouble("RIGHT_BC_VALUE1");
+                right_bc.value2 = config.getDouble("RIGHT_BC_VALUE2");
+                break;
+            }
+            case 4: 
+            {
+                right_bc.type = BoundaryType::CONVECTION_RADIATION;
+                right_bc.value1 = config.getDouble("RIGHT_BC_VALUE1");
+                right_bc.value2 = config.getDouble("RIGHT_BC_VALUE2");
+                right_bc.value3 = config.getDouble("RIGHT_BC_VALUE3");
+                break;
+            }
+        }
+        
+        if(radModel == radiationModel::DISCRETE_ORDINATE_METHOD) 
+        {
+            left_bc.value3 = config.getDouble("LEFT_BC_VALUE3");
+            right_bc.value3 = config.getDouble("RIGHT_BC_VALUE3");
         }
 
         double time_step = config.getDouble("TIME_STEP");
@@ -125,7 +224,7 @@ int main(int argc, char* argv[])
         std::cout << "求解模式: " << (mode == 0 ? "导热计算" : "物性反演") << std::endl;
         
         std::cout<<"创建求解器"<<std::endl;
-        multiLayerSolver1D solver(layers, time_step, left_bc, right_bc);
+        multiLayerSolver1D solver(layers, radModel, time_step, left_bc, right_bc);
         
         solver.printLayerInfo();
         solver.initialise(T_ini);
@@ -220,75 +319,95 @@ int main(int argc, char* argv[])
         else if(mode == 1)
         {
             std::cout<<"物性反演"<<std::endl;
-            std::string filename = config.getString("MEASUREMENT_FILE");
-            double measure_pos = config.getDouble("MEASURE_POSITION");
+
             int inversion_mode = config.getInt("INVERSION_MODE");
-            int measure_point_index = config.getInt("MEASURE_POINT_INDEX");
             int sampleI = config.getInt("SAMPLE_INDEX");
+            solver.setSampleIndex(sampleI);
+
+            std::cout << "待反演样件编号: " << sampleI << std::endl;
+            
+            std::string filename = config.getString("MEASUREMENT_FILE");
+            int measure_point_count = config.getInt("MEASURE_POINT_COUNT");
             
             std::cout << "温度测量文件: " << filename << std::endl;
-            std::cout << "测点位置: " << measure_pos << " m" << std::endl;
-            std::cout << "测点编号: " << measure_point_index << std::endl;
-            std::cout << "待反演样件编号: " << sampleI << std::endl;
-
-            int measure_index = 0;
+            std::cout << "测点数量: " << measure_point_count << std::endl;
+            std::cout << "温度测量文件: " << filename << std::endl;
+            std::cout << "测点数量: " << measure_point_count << std::endl;
+            
+            std::vector<int> measure_positions;
+            std::vector<int> measure_indices;
             const auto& node_positions = solver.getNodePositions();
-            double min_distance = std::abs(node_positions[0] - measure_pos);
-            for(int i = 0; i < solver.getTotalNodes(); i++)
+            for(int p = 1; p <= measure_point_count; p++) 
             {
-                double distance = std::abs(node_positions[i] - measure_pos);
-                if (distance < min_distance) 
+                std::string pos_key = "MEASURE_POSITION" + std::to_string(p);
+                std::string idx_key = "MEASURE_POINT_INDEX" + std::to_string(p);
+                
+                double measure_pos = config.getDouble(pos_key);
+                int measure_point_index = config.getInt(idx_key);
+                
+                int measure_node = 0;
+                double min_distance = std::abs(0 - measure_pos);
+                for(int i = 0; i < solver.getTotalNodes(); i++) 
                 {
-                    min_distance = distance;
-                    measure_index = i;
+                    double distance = std::abs(node_positions[i] - measure_pos);
+                    if(distance < min_distance) 
+                    {
+                        min_distance = distance;
+                        measure_node = i;
+                    }
                 }
+                
+                measure_positions.push_back(measure_node);
+                measure_indices.push_back(measure_point_index);
+
+                std::cout << "测点" << p << ": 位置=" << measure_pos << "m, 编号=" << measure_point_index << std::endl;
             }
 
             std::cout<<"读取温度测量文件: "<<filename<<std::endl;
-            solver.loadMeasurementData(filename, {measure_index}, {measure_point_index});
+            solver.loadMeasurementData(filename, measure_positions, measure_indices);
             std::cout<<"测量文件读取完成"<<std::endl;
 
-            auto& kappa_prop = layers[sampleI].thermal_conductivity;
-            auto& cp_prop = layers[sampleI].specific_heat;
+            const auto& kappa_prop = solver.getLayer().thermal_conductivity;
+            const auto& beta_prop = solver.getLayer().extinction;
             std::cout<<"创建反演目标函数"<<std::endl;
             ThermalPropertyObjective objective
             (
                 solver, 
-                kappa_prop,
-                cp_prop,
+                solver.getLayer(),
                 inversion_mode
             );
             
             // 从配置文件读取参数边界
             double k_lower_val = config.getDouble("K_LOWER_BOUND");
             double k_upper_val = config.getDouble("K_UPPER_BOUND");
-            double cp_lower_val = config.getDouble("CP_LOWER_BOUND");
-            double cp_upper_val = config.getDouble("CP_UPPER_BOUND");
-            
+
             objective.setThermalConductivityBounds(k_lower_val, k_upper_val);
-            objective.setSpecificHeatBounds(cp_lower_val, cp_upper_val);
+          
+            std::cout << "参数边界设置: 热导率[" << k_lower_val << "-" << k_upper_val<< "] W/m/K"<<std::endl;
+            if(inversion_mode == 0) 
+            {
+                double beta_lower_val = config.getDouble("BETA_LOWER_BOUND");
+                double beta_upper_val = config.getDouble("BETA_UPPER_BOUND");
+                objective.setExtinctionBounds(beta_lower_val, beta_upper_val);
+                std::cout << "         衰减系数[" << beta_lower_val << "-" << beta_upper_val << "] 1/m";
+            }
             
             double reg_lambda = config.getDouble("REGULARIZATION_LAMBDA");
             objective.setRegularizationParameter(reg_lambda);
-            
-            std::cout << "参数边界设置: 热导率[" << k_lower_val << "-" << k_upper_val 
-                      << "] W/m/K, 比热[" << cp_lower_val << "-" << cp_upper_val << "] J/kg/K" << std::endl;
             std::cout << "正则化参数: " << reg_lambda << std::endl;
             
             std::vector<double> initial_guess(objective.getParameterCount());
-            const double deltaK = (k_upper_val - k_lower_val)/kappa_prop.getValues().size();
             for(size_t i = 0; i < kappa_prop.getValues().size(); i++)
             {
-                initial_guess[i] = k_lower_val + i*deltaK;
+                initial_guess[i] = kappa_prop.getValues()[i];
             }
             
             if(inversion_mode == 0) 
             {
                 size_t k_count = kappa_prop.getValues().size();
-                const double deltaCp = (cp_upper_val - cp_lower_val)/cp_prop.getValues().size();
-                for(size_t i = 0; i < cp_prop.getValues().size(); i++)
+                for(size_t i = 0; i < beta_prop.getValues().size(); i++)
                 {
-                    initial_guess[i + k_count] = cp_lower_val + i*deltaCp;
+                    initial_guess[i + k_count] = beta_prop.getValues()[i];
                 }
             }
             
@@ -358,7 +477,12 @@ int main(int argc, char* argv[])
             std::cout << "迭代次数: " << result.iterations << std::endl;
             std::cout << "是否收敛: " << (result.converged ? "是" : "否") << std::endl;
             std::cout << "消息: " << result.message << std::endl;
-            
+            objective.updateMaterialProperties(result.optimal_parameters);
+            std::cout<< "优化参数：\n";
+            for(size_t i = 0; i < result.optimal_parameters.size(); i++)
+            {
+                std::cout<<result.optimal_parameters[i]<<"\n";
+            }
             // 输出多层反演结果到文件
             std::ofstream result_file("multi_layer_inversion_result.txt");
             if (result_file.is_open()) 
@@ -373,6 +497,7 @@ int main(int argc, char* argv[])
                 
                 result_file << "# 热导率反演结果" << std::endl;
                 result_file << "# 温度(°C)\t热导率(W/m/K)" << std::endl;
+                
                 for (size_t i = 0; i < kappa_prop.getTemperatures().size(); i++)
                 {
                     result_file << kappa_prop.getTemperatures()[i] << "\t" 
@@ -381,18 +506,13 @@ int main(int argc, char* argv[])
                 
                 if(inversion_mode == 0) 
                 {
-                    result_file << std::endl << "# 比热反演结果" << std::endl;
-                }
-                else
-                {
-                    result_file << std::endl << "# 比热保持原值（未反演）" << std::endl;
-                }
-
-                result_file << "# 温度(°C)\t比热(J/kg/K)" << std::endl;
-                for (size_t i = 0; i < cp_prop.getTemperatures().size(); i++) 
-                {
-                    result_file << cp_prop.getTemperatures()[i] << "\t" 
-                                << cp_prop.getValues()[i] << std::endl;
+                    result_file << std::endl << "# 衰减系数反演结果" << std::endl;
+                    result_file << "# 温度(°C)\t衰减系数(1/m)" << std::endl;
+                    for (size_t i = 0; i < beta_prop.getTemperatures().size(); i++) 
+                    {
+                        result_file << beta_prop.getTemperatures()[i] << "\t" 
+                                    << beta_prop.getValues()[i] << std::endl;
+                    }
                 }
                 
                 result_file.close();

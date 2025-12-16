@@ -1,6 +1,9 @@
 # 多层材料反演求解器配置文件
 # 注释行以#开头
 
+ # 辐射模型选择 (0:无辐射 1:离散坐标法 2:Rosseland)
+RADIATION_MODEL  0  
+
 # 层数
 LAYER_COUNT 3                  # 材料层数
 

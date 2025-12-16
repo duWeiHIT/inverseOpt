@@ -33,16 +33,12 @@ target_link_libraries(singleLayerInverse PRIVATE Eigen3::Eigen ceres)
 add_executable(multiLayerInverse src/multiLayerInverse.cpp)
 target_link_libraries(multiLayerInverse PRIVATE Eigen3::Eigen ceres)
 
-add_executable(dataGen src/dataGen.cpp)
-target_link_libraries(dataGen PRIVATE Eigen3::Eigen ceres)
 
 # 编译选项
 if(MSVC)
     target_compile_options(singleLayerInverse PRIVATE /W4)
     target_compile_options(multiLayerInverse PRIVATE /W4)
-    target_compile_options(dataGen PRIVATE /W4)
 else()
     target_compile_options(singleLayerInverse PRIVATE -Wall -Wextra -Wpedantic)
     target_compile_options(multiLayerInverse PRIVATE -Wall -Wextra -Wpedantic)
-    target_compile_options(dataGen PRIVATE -Wall -Wextra -Wpedantic)
 endif()

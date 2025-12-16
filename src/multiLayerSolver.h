@@ -8,7 +8,7 @@ class multiLayerSolver1D
 : public heatTransferSolver
 {
 private:
-    const std::vector<MaterialLayer>& layers;
+
     double total_length;
 
     int sampleI;
@@ -56,7 +56,17 @@ private:
     ) const 
     {
         int layer_id = node_layer_id[node_index];
-        return layers[layer_id + offset].getK(temp);
+        double kappa = layers[layer_id + offset].getK(temp);
+        
+        if(model == radiationModel::ROSSELAND)
+        {
+            double n = layers[layer_id + offset].refractiveIndex;
+            kappa +=
+                16.0*n*n*stefan_boltzmann*pow(temp + 273.15,3)/
+                (3.0*layers[layer_id + offset].getExtinction(temp));
+        }
+
+        return kappa;
     }
     
     inline double getSpecificHeat
@@ -275,6 +285,20 @@ private:
         applyLeftBoundary(T_old);
         applyRightBoundary(T_old);
     }
+    
+    inline void correctRad
+    (
+        std::vector<double>& D, 
+        std::vector<double>& S,
+        const std::vector<double>& temperature
+    )
+    {
+        if(model == radiationModel::DISCRETE_ORDINATE_METHOD)
+        {
+            radiation_solver->solve();
+            radiation_solver->correct(D, S, temperature);
+        }
+    }
 
     // TDMA算法求解三对角方程组
     inline void solveTDMA(std::vector<double>& x) 
@@ -307,18 +331,21 @@ public:
     multiLayerSolver1D
     (
         const std::vector<MaterialLayer>& material_layers,
+        radiationModel modle_type,
         double time_step,
         BoundaryCondition& left_bc,
         BoundaryCondition& right_bc
     ) 
     : 
-    heatTransferSolver(time_step),
-    layers(material_layers),
-    total_length(),
-    sampleI(1),
+    heatTransferSolver(time_step, modle_type),
+    total_length(0.0),
+    sampleI(0),
     left_boundary(left_bc), 
     right_boundary(right_bc) 
     {
+        //赋值构造
+        layers = material_layers;
+
         // 计算总长度和总节点数目
         total_length = 0.0;
         for(const auto& layer : layers) 
@@ -344,6 +371,12 @@ public:
     void initialise(double iniT) 
     {
         heatTransferSolver::initialise(iniT);
+        
+        if(model == radiationModel::DISCRETE_ORDINATE_METHOD)
+        {
+            radiation_solver = std::make_unique<radiationSolver>(*this);
+            radiation_solver->initialise();
+        }
 
         // 初始化矩阵和温度场
         L.resize(total_nodes, 0.0);
@@ -361,7 +394,7 @@ public:
         {
             const double dx_left = node_positions[i] - node_positions[i-1];
             const double dx_right = node_positions[i+1] - node_positions[i];
-            const double dx_avg = (dx_left + dx_right)/2.0;
+            const double dx_avg = 0.5*(dx_left + dx_right);
 
             // 使用调和平均
             const double k_eff_left = getInterfaceConductivity(i-1, i, temperature[i-1], temperature[i]);
@@ -400,6 +433,9 @@ public:
         
         // 应用边界条件
         applyBoundaryConditions(temperature);
+
+        //添加辐射
+        correctRad(D, S, temperature);
         
         // 求解
         solveTDMA(temperature);
@@ -451,64 +487,64 @@ public:
         }
     }
     
+    virtual double getLeftEmissivity() const override
+    {
+        return left_boundary.value3;
+    }
+
+    virtual double getRightEmissivity() const override
+    {
+        return right_boundary.value3;
+    }
+
+    virtual double getDx(int index) const override
+    {
+        return 0.5*(node_positions[index + 1] - node_positions[index - 1]);
+    }
+
+    virtual double getExtinction(int index) const override
+    {
+        int layer_id = node_layer_id[index];
+        int layer_id1 = node_layer_id[index + 1];
+        if(layer_id != layer_id1)
+        {
+            // 界面节点，取两侧介质的加权平均
+            const double dx_left = node_positions[index] - node_positions[index - 1];
+            const double dx_right = node_positions[index + 1] - node_positions[index];
+            const double dx_avg = 0.5*(dx_left + dx_right);
+            const double s1 = 0.5*dx_left/dx_avg;
+            const double s2 = 0.5*dx_right/dx_avg;
+            double ext_left = layers[layer_id].getExtinction(temperature[index]);
+            double ext_right = layers[layer_id1].getExtinction(temperature[index]);
+            return ext_left*s1 + ext_right*s2;
+        }
+        return layers[layer_id].getExtinction(temperature[index]);
+    }
+
+    virtual double getAlbedo(int index) const override
+    {
+        int layer_id = node_layer_id[index];
+        int layer_id1 = node_layer_id[index + 1];
+        if(layer_id != layer_id1)
+        {
+            // 界面节点，取两侧介质的加权平均
+            const double dx_left = node_positions[index] - node_positions[index - 1];
+            const double dx_right = node_positions[index + 1] - node_positions[index];
+            const double dx_avg = 0.5*(dx_left + dx_right);
+            const double s1 = 0.5*dx_left/dx_avg;
+            const double s2 = 0.5*dx_right/dx_avg;
+            double albedo_left = layers[layer_id].getAlbedo(temperature[index]);
+            double albedo_right = layers[layer_id1].getAlbedo(temperature[index]);
+            return albedo_left*s1 + albedo_right*s2;
+        }
+
+        return layers[layer_id].getAlbedo(temperature[index]);
+    }
+
     // 获取材料层信息
-    virtual std::vector<double> rhoCp() const override
-    {
-        std::vector<double> rhoCp(total_nodes);
-        const int n = total_nodes - 1;
-        for (int i = 0; i < n; i++)
-        {
-            const double dx_left = node_positions[i] - node_positions[i-1];
-            const double dx_right = node_positions[i+1] - node_positions[i];
-            const double dx_avg = (dx_left + dx_right)/2.0;
+    const MaterialLayer& getLayer() const { return layers[sampleI]; }
 
-            double rho = getDensity(i);
-            double cp = getSpecificHeat(i, temperature[i]);
-
-            rhoCp[i] = rho*cp;
-            
-            // 检查是否为界面节点
-            bool is_interface = (node_layer_id[i+1] != node_layer_id[i]);
-            
-            //节点位于界面，控制容积内的比热和密度由两侧介质计算
-            if (is_interface) 
-            {
-                const double s1 = 0.5*dx_left/dx_avg;
-                const double s2 = 0.5*dx_right/dx_avg;
-                rhoCp[i] *= s1;
-                const double rhoRight = getDensity(i, 1);
-                const double cpRight = getSpecificHeat(i, temperature[i], 1);
-                rhoCp[i] += rhoRight*cpRight*s2;
-            }
-        }
-
-        rhoCp[n] = getDensity(n)*getSpecificHeat(n, temperature[n]);
-
-        return rhoCp;
-    }
-
-    virtual std::vector<double> kappa() const override
-    {
-        std::vector<double> kappa(total_nodes);
-        const int n = total_nodes - 1;
-        for (int i = 0; i <n; i++)
-        {
-            bool is_interface = (node_layer_id[i+1] != node_layer_id[i]);
-            if (is_interface)
-            {
-                const double k_left = getInterfaceConductivity(i-1, i, temperature[i-1], temperature[i]);
-                const double k_right = getInterfaceConductivity(i, i+1, temperature[i], temperature[i+1], 1);
-
-                kappa[i] = 2.0*k_left*k_right/(k_left + k_right);
-            }
-            else
-            {
-                kappa[i] = getThermalConductivity(i, temperature[i]);
-            }
-        }
-        kappa[n] = getThermalConductivity(n, temperature[n]);
-        return kappa;
-    }
+    MaterialLayer& getLayer() { return layers[sampleI]; }
 
     BoundaryCondition& getLeftBoundary() { return left_boundary; }
     BoundaryCondition& getRightBoundary() { return right_boundary; }
@@ -516,8 +552,9 @@ public:
     const BoundaryCondition& getRightBoundary() const{ return right_boundary; }
     const std::vector<MaterialLayer>& getLayers() const { return layers; }
 
-    void setSample(int i){sampleI = i;}
-    int getSampleI(){return sampleI;}
+    void setSampleIndex(int i){sampleI = i;}
+
+    int getSampleIndex(){return sampleI;}
 
     const std::vector<double>& getNodePositions() const {return node_positions;}
 
@@ -559,6 +596,7 @@ private:
     using heatTransferSolverAD<T>::dt;
     using heatTransferSolverAD<T>::total_nodes;
     using heatTransferSolverAD<T>::temperature;
+    using heatTransferSolverAD<T>::layers_ad;
 
     double total_length;
     int sampleI = 0;
@@ -569,14 +607,21 @@ private:
     BoundaryCondition& left_boundary;
     BoundaryCondition& right_boundary;
     
-    std::vector<MaterialLayerAD<T>> layers_ad;
     std::vector<T> L, D, U, S;
 
     // 自动微分兼容的材料属性获取
     T getThermalConductivity(int node_index, T temp, int offset = 0) const 
     {
         int layer_id = node_layer_id[node_index] + offset;
-        return layers_ad[layer_id].thermal_conductivity.evaluate(temp);
+        T kappa = layers_ad[layer_id].thermal_conductivity.evaluate(temp);
+        if(this->model == radiationModel::ROSSELAND)
+        {
+            double n = layers_ad[layer_id + offset].refractiveIndex;
+            kappa +=
+                16.0*n*n*stefan_boltzmann*ceres::pow(temp + 273.15,3)/
+                (3.0*layers_ad[layer_id + offset].getExtinction(temp));
+        }
+        return kappa;
     }
     
     T getSpecificHeat(int node_index, T temp, int offset = 0) const 
@@ -792,6 +837,20 @@ private:
         applyRightBoundary(T_old);
     }
 
+    inline void correctRad
+    (
+        std::vector<T>& D, 
+        std::vector<T>& S,
+        const std::vector<T>& temperature
+    )
+    {
+        if(this->model == radiationModel::DISCRETE_ORDINATE_METHOD)
+        {
+            this->radiation_solver->solve();
+            this->radiation_solver->correct(D, S, temperature);
+        }
+    }
+
     // TDMA求解器（自动微分兼容）
     void solveTDMA(std::vector<T>& x) 
     {
@@ -824,7 +883,7 @@ public:
     : 
     heatTransferSolverAD<T>(original_solver),
     total_length(original_solver.getTotalLength()),
-    sampleI(original_solver.getSampleI()),
+    sampleI(original_solver.getSampleIndex()),
     layers(original_solver.getLayers()),
     node_positions(original_solver.getNodePositions()),
     node_layer_id(original_solver.getNodeLayerId()),
@@ -837,7 +896,12 @@ public:
     virtual void initialize(int num_parameters)
     {
         heatTransferSolverAD<T>::initialize(num_parameters);
-
+        
+        if(this->model == radiationModel::DISCRETE_ORDINATE_METHOD)
+        {
+            this->radiation_solver = std::make_unique<radiationSolverAD<T>>(*this);
+            this->radiation_solver->initialise(num_parameters);
+        }
         // 初始化材料属性的AD变量
         for(size_t i = 0; i < layers.size(); ++i)
         {
@@ -938,7 +1002,64 @@ public:
         // 应用边界条件
         applyBoundaryConditions(temperature);
         
+        //添加辐射
+        correctRad(D, S, temperature);
+        
         solveTDMA(temperature);
+    }
+
+    virtual double getLeftEmissivity() const override
+    {
+        return left_boundary.value3;
+    }
+
+    virtual double getRightEmissivity() const override
+    {
+        return right_boundary.value3;
+    }
+
+    virtual double getDx(int index) const override
+    {
+        return 0.5*(node_positions[index + 1] - node_positions[index - 1]);
+    }
+
+    virtual T getExtinction(int index) const override
+    {
+        int layer_id = node_layer_id[index];
+        int layer_id1 = node_layer_id[index + 1];
+        if(layer_id != layer_id1)
+        {
+            // 界面节点，取两侧介质的加权平均
+            const double dx_left = node_positions[index] - node_positions[index - 1];
+            const double dx_right = node_positions[index + 1] - node_positions[index];
+            const double dx_avg = 0.5*(dx_left + dx_right);
+            const double s1 = 0.5*dx_left/dx_avg;
+            const double s2 = 0.5*dx_right/dx_avg;
+            T ext_left = layers_ad[layer_id].getExtinction(temperature[index]);
+            T ext_right = layers_ad[layer_id1].getExtinction(temperature[index]);
+            return ext_left*s1 + ext_right*s2;
+        }
+        return layers_ad[layer_id].getExtinction(temperature[index]);
+    }
+
+    virtual T getAlbedo(int index) const override
+    {
+        int layer_id = node_layer_id[index];
+        int layer_id1 = node_layer_id[index + 1];
+        if(layer_id != layer_id1)
+        {
+            // 界面节点，取两侧介质的加权平均
+            const double dx_left = node_positions[index] - node_positions[index - 1];
+            const double dx_right = node_positions[index + 1] - node_positions[index];
+            const double dx_avg = 0.5*(dx_left + dx_right);
+            const double s1 = 0.5*dx_left/dx_avg;
+            const double s2 = 0.5*dx_right/dx_avg;
+            T albedo_left = layers_ad[layer_id].getAlbedo(temperature[index]);
+            T albedo_right = layers_ad[layer_id1].getAlbedo(temperature[index]);
+            return albedo_left*s1 + albedo_right*s2;
+        }
+
+        return layers_ad[layer_id].getAlbedo(temperature[index]);
     }
 
     virtual void computeResiduals(std::vector<T>& residuals) override

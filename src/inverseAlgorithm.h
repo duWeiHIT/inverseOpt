@@ -14,34 +14,31 @@ class ThermalPropertyObjective
 {
 private:
     heatTransferSolver& solver_;
-    MaterialProperty& k_prop_;
-    MaterialProperty& cp_prop_;
+    MaterialLayer& layer;
     int residualSize;
     int inversion_mode_;
     double k_lower_bound_;
     double k_upper_bound_;
-    double cp_lower_bound_;
-    double cp_upper_bound_;
+    double beta_lower_bound_;
+    double beta_upper_bound_;
     double regularization_lambda_;
 public:
     ThermalPropertyObjective
     (
         heatTransferSolver& solver,
-        MaterialProperty& k_ref,
-        MaterialProperty& cp_ref,
-        int inversion_mode = 0
+        MaterialLayer& material_layer,
+        int inversion_mode
     )
     : 
     solver_(solver),
-    k_prop_(k_ref), 
-    cp_prop_(cp_ref),
+    layer(material_layer),
     residualSize(solver.getMeasurement().getTimes().size() * solver.getMeasurement().getMeasurePositions().size()),
     inversion_mode_(inversion_mode),
     k_lower_bound_(1.0),
     k_upper_bound_(1000.0),
-    cp_lower_bound_(100.0),
-    cp_upper_bound_(5000.0),
-    regularization_lambda_(0.0005)
+    beta_lower_bound_(100.0),
+    beta_upper_bound_(50000.0),
+    regularization_lambda_(0.001)
     {}
     
     // 设置参数边界
@@ -49,10 +46,10 @@ public:
         k_lower_bound_ = lower;
         k_upper_bound_ = upper;
     }
-    
-    void setSpecificHeatBounds(double lower, double upper) {
-        cp_lower_bound_ = lower;
-        cp_upper_bound_ = upper;
+
+    void setExtinctionBounds(double lower, double upper) {
+        beta_lower_bound_ = lower;
+        beta_upper_bound_ = upper;
     }
     
     void setRegularizationParameter(double lambda) {
@@ -62,14 +59,14 @@ public:
     // 获取参数边界
     double getThermalConductivityLowerBound() const { return k_lower_bound_; }
     double getThermalConductivityUpperBound() const { return k_upper_bound_; }
-    double getSpecificHeatLowerBound() const { return cp_lower_bound_; }
-    double getSpecificHeatUpperBound() const { return cp_upper_bound_; }
+    double getExtinctionLowerBound() const { return beta_lower_bound_; }
+    double getExtinctionUpperBound() const { return beta_upper_bound_; }
     
     // 应用参数边界约束
     std::vector<double> applyBounds(const std::vector<double>& parameters) const 
     {
         std::vector<double> bounded_params = parameters;
-
+        MaterialProperty& k_prop_ = layer.thermal_conductivity;
         size_t k_count = k_prop_.getValues().size();
         
         // 约束热导率
@@ -78,7 +75,7 @@ public:
             bounded_params[i] = std::clamp(parameters[i], 0.0, 1.0);
         }
         
-        // 约束比热
+        // 约束消光系数
         for (size_t i = k_count; i < bounded_params.size(); ++i) 
         {
             bounded_params[i] = std::clamp(parameters[i], 0.0, 1.0);
@@ -102,15 +99,18 @@ public:
 
     void computeResiduals(const double* const* parameters, double* residuals) 
     {
+        const MaterialProperty& k_prop_ = layer.thermal_conductivity;
         size_t k_count = k_prop_.getValues().size();
         std::vector<double> params_vec(getParameterCount());
         for (size_t i = 0; i < k_count; ++i) 
         {
             params_vec[i] = parameters[0][i];
         }
+
         if(inversion_mode_ == 0)
         {
-            for (size_t i = 0; i < cp_prop_.getValues().size(); ++i) 
+            const MaterialProperty& beta_prop = layer.extinction;
+            for (size_t i = 0; i < beta_prop.getValues().size(); ++i) 
             {
                 params_vec[i + k_count] = parameters[1][i];
             }
@@ -130,7 +130,8 @@ public:
     {
         //应用边界约束
         const std::vector<double> bounded_params = applyBounds(parameters);
-        std::vector<double>& k_vals = k_prop_.getValues();
+        MaterialProperty& k_prop = layer.thermal_conductivity;
+        std::vector<double>& k_vals = k_prop.getValues();
         size_t k_count = k_vals.size();
         
         std::vector<double> vals(bounded_params.size());
@@ -141,10 +142,10 @@ public:
             vals[i] = bounded_params[i]*deltaK + k_lower_bound_;
         }
 
-        const double deltaCp = cp_upper_bound_ - cp_lower_bound_;
+        const double deltaBeta = beta_upper_bound_ - beta_lower_bound_;
         for(size_t i = k_count; i < parameters.size(); ++i)
         {
-            vals[i] = bounded_params[i]*deltaCp + cp_lower_bound_;
+            vals[i] = bounded_params[i]*deltaBeta + beta_lower_bound_;
         }
 
         for (size_t i = 0; i < k_count; ++i) 
@@ -152,11 +153,11 @@ public:
             k_vals[i] = vals[i];
         }
 
-        std::vector<double>& cp_vals = cp_prop_.getValues(); 
+        std::vector<double>& beta_vals = layer.extinction.getValues(); 
 
-        for (size_t i = 0; i < cp_vals.size() && i + k_count < bounded_params.size(); ++i) 
+        for (size_t i = 0; i < beta_vals.size() && i + k_count < bounded_params.size(); ++i) 
         {
-            cp_vals[i] = vals[i+k_count];
+            beta_vals[i] = vals[i+k_count];
         }
     }
 
@@ -175,8 +176,9 @@ public:
         // 添加Tikhonov正则化（光滑性约束）
         if (regularization_lambda_ > 0) 
         {
+            const MaterialProperty& k_prop = layer.thermal_conductivity;
             // 对热导率添加二阶差分正则化（鼓励光滑变化）
-            const auto& k_vals = k_prop_.getValues();
+            const auto& k_vals = k_prop.getValues();
             for (size_t i = 1; i < k_vals.size() - 1; ++i) 
             {
                 double second_diff = k_vals[i-1] - 2*k_vals[i] + k_vals[i+1];
@@ -185,11 +187,12 @@ public:
 
             if(inversion_mode_ == 0)
             {
-                // 对比热添加二阶差分正则化（鼓励光滑变化）
-                const auto& cp_vals = cp_prop_.getValues();
-                for (size_t i = 1; i < cp_vals.size() - 1; ++i) 
+                const MaterialProperty& beta_prop = layer.extinction;
+                // 对消光系数添加二阶差分正则化（鼓励光滑变化）
+                const auto& beta_vals = beta_prop.getValues();
+                for (size_t i = 1; i < beta_vals.size() - 1; ++i) 
                 {
-                    double second_diff = cp_vals[i-1] - 2*cp_vals[i] + cp_vals[i+1];
+                    double second_diff = beta_vals[i-1] - 2*beta_vals[i] + beta_vals[i+1];
                     regularization += regularization_lambda_ * second_diff * second_diff;
                 }
             }
@@ -200,39 +203,48 @@ public:
 
     int getParameterCount() const 
     {
+        const MaterialProperty& k_prop = layer.thermal_conductivity;
+        const MaterialProperty& beta_prop = layer.extinction;
         if (inversion_mode_ == 0) 
         {
-           return k_prop_.getValues().size() + cp_prop_.getValues().size();
+           return k_prop.getValues().size() + beta_prop.getValues().size();
         }
 
-        return  k_prop_.getValues().size();;
+        return  k_prop.getValues().size();;
     }
 
     heatTransferSolver& solver() { return solver_; }
 
-    const MaterialProperty& kappa() const { return k_prop_; }
+    const MaterialProperty& kappa() const { return layer.thermal_conductivity; }
 
-    const MaterialProperty& cp() const { return cp_prop_; }
+    const MaterialProperty& cp() const { return layer.specific_heat; }
+
+    const MaterialProperty& extinction() const { return layer.extinction; }
+
+    const MaterialProperty& albedo() const { return layer.albedo; }
 
     inline int getInversionMode() const { return inversion_mode_; }
 
     inline double getRegularizationParameter() const { return regularization_lambda_; }
+    
     //归一化
     void normalizeParameters(std::vector<double>& parameters) const
     {
+        const MaterialProperty& k_prop = layer.thermal_conductivity;
+
         const double deltaK = k_upper_bound_ - k_lower_bound_;
-        for(size_t i = 0; i < k_prop_.getValues().size(); ++i)
+        for(size_t i = 0; i < k_prop.getValues().size(); ++i)
         {
             parameters[i] = (parameters[i] - k_lower_bound_)/deltaK;
         }
 
         if(inversion_mode_ == 0)
         {   
-            size_t k_count = k_prop_.getValues().size();
-            const double deltaCp = cp_upper_bound_ - cp_lower_bound_;
+            size_t k_count = k_prop.getValues().size();
+            const double deltaBeta = beta_upper_bound_ - beta_lower_bound_;
             for(size_t i = k_count; i < parameters.size(); ++i)
             {
-                parameters[i] = (parameters[i] - cp_lower_bound_)/deltaCp;
+                parameters[i] = (parameters[i] - beta_lower_bound_)/deltaBeta;
             }
         }
     }
@@ -1446,7 +1458,7 @@ private:
             mutable_parameter_block_sizes()->push_back(objective_->kappa().getValues().size());
             if(objective_->getInversionMode() == 0)
             {
-                mutable_parameter_block_sizes()->push_back(objective_->cp().getValues().size());
+                mutable_parameter_block_sizes()->push_back(objective_->extinction().getValues().size());
             }
             
             // 设置残差大小
@@ -1472,9 +1484,9 @@ private:
                 
                 if(objective_->getInversionMode() == 0 && jacobians[1] != nullptr)
                 {
-                    double cp_upper = objective_->getSpecificHeatUpperBound();
-                    double cp_lower = objective_->getSpecificHeatLowerBound();
-                    computeJacobianAD(parameters, jacobians[1], cp_upper, cp_lower, 1);
+                    double beta_upper = objective_->getExtinctionUpperBound();
+                    double beta_lower = objective_->getExtinctionLowerBound();
+                    computeJacobianAD(parameters, jacobians[1], beta_upper, beta_lower, 1);
                 }
             }
 
@@ -1725,17 +1737,17 @@ private:
             std::cout << "添加热导率光滑性正则化，参数点数: " << kappa_size << std::endl;
         }
         
-        // 比热参数的光滑性正则化（如果反演比热）
+        // 衰减参数的光滑性正则化（如果同时反演衰减系数）
         if (objective->getInversionMode() == 0)
         {
-            int cp_size = objective->cp().getValues().size();
-            if (cp_size >= 3) 
+            int beta_size = objective->extinction().getValues().size();
+            if (beta_size >= 3) 
             {
-                auto* cp_smooth_cost = 
-                new SmoothnessRegularizationCostFunction(cp_size, smoothness_weight);
+                auto* beta_smooth_cost = 
+                new SmoothnessRegularizationCostFunction(beta_size, smoothness_weight);
                 
-                problem.AddResidualBlock(cp_smooth_cost, nullptr, parameters[1].data());
-                std::cout << "添加比热光滑性正则化，参数点数: " << cp_size << std::endl;
+                problem.AddResidualBlock(beta_smooth_cost, nullptr, parameters[1].data());
+                std::cout << "添加比热光滑性正则化，参数点数: " << beta_size << std::endl;
             }
         }
     }

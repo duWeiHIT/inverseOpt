@@ -15,9 +15,6 @@ private:
     //空间步长
     double dx;
     
-    // 材料层
-    const MaterialLayer& layer;
-    
     // 边界条件
     BoundaryCondition& left_boundary;
     BoundaryCondition& right_boundary;
@@ -32,8 +29,18 @@ private:
         double temp_right
     ) const 
     {
-        double k_left = layer.getK(temp_left);
-        double k_right = layer.getK(temp_right);
+        double k_left =  layers[0].getK(temp_left);
+        double k_right = layers[0].getK(temp_right);
+        if(model == radiationModel::ROSSELAND)
+        {
+            double n = layers[0].refractiveIndex;
+            k_left +=
+                16.0*n*n*stefan_boltzmann*pow(temp_left + 273.15,3)/
+                (3.0*layers[0].getExtinction(temp_left));
+            k_right += 
+                16.0*n*n*stefan_boltzmann*pow(temp_right + 273.15,3)/
+                (3.0*layers[0].getExtinction(temp_right));
+        }
         return 2.0*k_left*k_right /(k_left + k_right);
     }
     
@@ -41,18 +48,20 @@ public:
     singleLayerSolver1D
     (
         const MaterialLayer& mat_layer,
+        radiationModel radModel,
         double time_step,
         BoundaryCondition& left_bc, 
         BoundaryCondition& right_bc
     )
     : 
-    heatTransferSolver(time_step),
+    heatTransferSolver(time_step, radModel),
     length(mat_layer.thickness),
-    layer(mat_layer),
+    dx(0.0),
     left_boundary(left_bc), 
     right_boundary(right_bc)
     {
-        total_nodes = layer.nodes;
+        layers.push_back(mat_layer);
+        total_nodes = layers[0].nodes;
         dx = length/(total_nodes - 1);
     }
 
@@ -67,6 +76,12 @@ public:
     void initialise(double iniT) 
     {
         heatTransferSolver::initialise(iniT);
+        
+        if(model == radiationModel::DISCRETE_ORDINATE_METHOD)
+        {
+            radiation_solver = std::make_unique<radiationSolver>(*this);
+            radiation_solver->initialise();
+        }
 
         // 初始化矩阵和温度场
         L.resize(total_nodes, 0.0);
@@ -81,7 +96,7 @@ public:
         const std::vector<double>& T_old
     ) 
     {     
-        const double rhoCp = layer.density*layer.getCp(T_old[0]);
+        const double rhoCp = layers[0].density*layers[0].getCp(T_old[0]);
         const double diag = 0.5*rhoCp/dt;   
         switch (left_boundary.type) 
         {
@@ -96,8 +111,8 @@ public:
             case BoundaryType::FIXED_HEAT_FLUX: 
             {
                 const double q = left_boundary.value1;
-                const double k_0 = layer.getK(T_old[0]);
-                const double k_1 = layer.getK(T_old[1]);
+                const double k_0 = layers[0].getK(T_old[0]);
+                const double k_1 = layers[0].getK(T_old[1]);
                 const double k_avg = 2.0*k_0*k_1/(k_0 + k_1);
 
                 const double upper = (k_avg+k_0)/(dx*dx);
@@ -110,8 +125,8 @@ public:
             {
                 const double h = left_boundary.value2;
                 const double T_inf = left_boundary.value1;
-                const double k_0 = layer.getK(T_old[0]);
-                const double k_1 = layer.getK(T_old[1]);
+                const double k_0 = layers[0].getK(T_old[0]);
+                const double k_1 = layers[0].getK(T_old[1]);
                 const double k_avg = 2.0*k_0*k_1/(k_0 + k_1);
 
                 const double u1 = (k_avg+k_0)/(dx*dx);
@@ -127,8 +142,8 @@ public:
                 const double T_inf = left_boundary.value1;
                 const double epsilon = left_boundary.value3;
                 
-                const double k_0 = layer.getK(T_old[0]);
-                const double k_1 = layer.getK(T_old[1]);
+                const double k_0 = layers[0].getK(T_old[0]);
+                const double k_1 = layers[0].getK(T_old[1]);
                 const double k_avg = 2.0*k_0*k_1/(k_0 + k_1);
                 
                 const double T_old_abs = T_old[0] + 273.15; 
@@ -157,7 +172,7 @@ public:
     ) 
     {  
         int n = total_nodes - 1;  
-        const double rhoCp = layer.density*layer.getCp(T_old[n]);
+        const double rhoCp = layers[0].density*layers[0].getCp(T_old[n]);
         const double diag = 0.5*rhoCp/dt;      
         switch (right_boundary.type) 
         {
@@ -172,8 +187,8 @@ public:
             case BoundaryType::FIXED_HEAT_FLUX: 
             {
                 const double q = right_boundary.value1;
-                const double k_n = layer.getK(T_old[n]);
-                const double k_n_1 = layer.getK(T_old[n-1]);
+                const double k_n = layers[0].getK(T_old[n]);
+                const double k_n_1 = layers[0].getK(T_old[n-1]);
                 const double k_avg = 2.0*k_n*k_n_1/(k_n + k_n_1);
 
                 const double upper = (k_avg+k_n_1)/(dx*dx);
@@ -188,8 +203,8 @@ public:
                 const double h = right_boundary.value2;
                 const double T_inf = right_boundary.value1;
 
-                const double k_n = layer.getK(T_old[n]);
-                const double k_n_1 = layer.getK(T_old[n-1]);
+                const double k_n = layers[0].getK(T_old[n]);
+                const double k_n_1 = layers[0].getK(T_old[n-1]);
                 const double k_avg = 2.0*k_n*k_n_1/(k_n + k_n_1);
 
                 const double u1 = (k_avg+k_n)/(dx*dx);
@@ -206,8 +221,8 @@ public:
                 const double T_inf = right_boundary.value1;
                 const double epsilon = right_boundary.value3;
                 
-                const double k_n = layer.getK(T_old[n]);
-                const double k_n_1 = layer.getK(T_old[n-1]);
+                const double k_n = layers[0].getK(T_old[n]);
+                const double k_n_1 = layers[0].getK(T_old[n-1]);
                 const double k_avg = 2.0*k_n*k_n_1/(k_n + k_n_1);
                 
                 const double T_old_abs = T_old[n] + 273.15; 
@@ -238,6 +253,20 @@ public:
     {
         applyLeftBoundary(T_old);
         applyRightBoundary(T_old);
+    }
+    
+    inline void correctRad
+    (
+        std::vector<double>& D, 
+        std::vector<double>& S,
+        const std::vector<double>& temperature
+    )
+    {
+        if(model == radiationModel::DISCRETE_ORDINATE_METHOD)
+        {
+            radiation_solver->solve();
+            radiation_solver->correct(D, S, temperature);
+        }
     }
 
     // TDMA算法求解三对角方程组
@@ -275,7 +304,7 @@ public:
             const double k_left = getInterfaceConductivity(temperature[i-1], temperature[i]);
             const double k_right = getInterfaceConductivity(temperature[i], temperature[i+1]);
 
-            const double rhoCp = layer.density*layer.getCp(temperature[i]);
+            const double rhoCp = layers[0].density*layers[0].getCp(temperature[i]);
             const double diag = rhoCp/dt;
             const double r1 = 1.0/(dx*dx);
             const double u_left = k_left*r1;
@@ -289,6 +318,9 @@ public:
             
         // 应用边界条件
         applyBoundaryCondition(temperature);
+        
+        // 添加辐射
+        correctRad(D, S, temperature);
             
         // 求解方程组
         solveTDMA(temperature);
@@ -338,34 +370,38 @@ public:
         }
     }
 
-
-    virtual std::vector<double> rhoCp() const override
+    virtual double getLeftEmissivity() const override
     {
-        std::vector<double> rhoCp(total_nodes);
-        for (int i = 0; i < total_nodes; i++)
-        {
-            rhoCp[i] = layer.getCp(temperature[i])*layer.density;
-        }
-        return rhoCp;
+        return left_boundary.value3;
     }
 
-    virtual std::vector<double> kappa() const override
+    virtual double getRightEmissivity() const override
     {
-        std::vector<double> k(total_nodes);
-        for (int i = 0; i < total_nodes; i++)
-        {
-            k[i] = layer.getK(temperature[i]);
-        }
-        return k;
+        return right_boundary.value3;
     }
 
-    const MaterialLayer& getLayer() const { return layer; }
+    virtual double getDx(int index) const override
+    {
+        return dx;
+    }
+
+    virtual double getExtinction(int index) const override
+    {
+        return layers[0].getExtinction(temperature[index]);
+    }
+
+    virtual double getAlbedo(int index) const override
+    {
+        return layers[0].getAlbedo(temperature[index]);
+    }
+
+    const MaterialLayer& getLayer() const { return layers[0]; }
+
+    MaterialLayer& getLayer() { return layers[0]; }
 
     BoundaryCondition& getLeftBoundary() { return left_boundary; }
 
     BoundaryCondition& getRightBoundary() { return right_boundary; }
-
-    double getDx() const { return dx; }
 
     double getLength() const { return length; }
 
@@ -390,6 +426,7 @@ private:
     using heatTransferSolverAD<T>::dt;
     using heatTransferSolverAD<T>::total_nodes;
     using heatTransferSolverAD<T>::temperature;
+    using heatTransferSolverAD<T>::layers_ad;
     // 几何和网格参数
     double length;
     
@@ -403,7 +440,7 @@ private:
     BoundaryCondition& left_boundary;
     BoundaryCondition& right_boundary;
     
-    MaterialLayerAD<T> layer_ad;
+
     //求解矩阵系数
     std::vector<T> L, D, U, S;
 
@@ -414,8 +451,18 @@ private:
         T temp_right
     ) const 
     {
-        const T k_left = layer_ad.getK(temp_left);
-        const T k_right = layer_ad.getK(temp_right);
+        T k_left = layers_ad[0].getK(temp_left);
+        T k_right = layers_ad[0].getK(temp_right);
+        if(this->model == radiationModel::ROSSELAND)
+        {
+            double n = layers_ad[0].refractiveIndex;
+            k_left +=
+                (16.0*n*n*stefan_boltzmann)*ceres::pow(temp_left + 273.15,3)/
+                (3.0*layers_ad[0].getExtinction(temp_left));
+            k_right += 
+                (16.0*n*n*stefan_boltzmann)*ceres::pow(temp_right + 273.15,3)/
+                (3.0*layers_ad[0].getExtinction(temp_right));
+        }
         // 调和平均，确保热流连续性
         return 2.0*k_left*k_right/(k_left + k_right);
     }
@@ -428,11 +475,10 @@ public:
     : 
     heatTransferSolverAD<T>(original_solver),
     length(original_solver.getLength()),
-    dx(original_solver.getDx()),
+    dx(original_solver.getDx(0)),
     layer(original_solver.getLayer()),
     left_boundary(original_solver.getLeftBoundary()),
-    right_boundary(original_solver.getRightBoundary()),
-    layer_ad(layer)
+    right_boundary(original_solver.getRightBoundary())
     {}
     
     virtual ~singleLayerSolver1DAD() = default;
@@ -441,6 +487,12 @@ public:
     {
         heatTransferSolverAD<T>::initialize(num_parameters);
         
+        if(this->model == radiationModel::DISCRETE_ORDINATE_METHOD)
+        {
+            this->radiation_solver = std::make_unique<radiationSolverAD<T>>(*this);
+            this->radiation_solver->initialise(num_parameters);
+        }
+
         // 初始化材料属性的AD变量
         const std::vector<double>& k_vals_original 
                 = layer.thermal_conductivity.getValues();
@@ -468,6 +520,7 @@ public:
                 k_vals[j].v.resize(num_parameters);
                 k_vals[j].v.setZero();
             }
+
             for(size_t j = 0; j < cp_vals_original.size(); ++j)
             {
                 cp_vals[j] = T(cp_vals_original[j]);
@@ -476,8 +529,8 @@ public:
             }
         }
 
-        layer_ad.thermal_conductivity.setValue(k_vals);
-        layer_ad.specific_heat.setValue(cp_vals);
+        layers_ad[0].thermal_conductivity.setValue(k_vals);
+        layers_ad[0].specific_heat.setValue(cp_vals);
 
         if(!std::is_same<T, double>::value)
         {
@@ -494,7 +547,7 @@ public:
         const std::vector<T>& T_old
     ) 
     {        
-        const T rhoCp = layer_ad.density*layer_ad.getK(T_old[0]);
+        const T rhoCp = layers_ad[0].density*layers_ad[0].getK(T_old[0]);
         const T diag = (0.5/dt)*rhoCp;
         switch (left_boundary.type) 
         {
@@ -512,8 +565,8 @@ public:
             {
                 // 第二类边界条件：定热流
                 const double q = left_boundary.value1;
-                const T k_0 = layer_ad.getK(T_old[0]);
-                const T k_1 = layer_ad.getK(T_old[1]);
+                const T k_0 = layers_ad[0].getK(T_old[0]);
+                const T k_1 = layers_ad[0].getK(T_old[1]);
                 const T k_avg = 2.0*k_0*k_1/(k_0 + k_1);
 
                 const double rdx = 1.0/dx;
@@ -529,8 +582,8 @@ public:
                 // 第三类边界条件：对流换热
                 const double h = left_boundary.value2;
                 const double T_inf = left_boundary.value1;
-                const T k_0 = layer_ad.getK(T_old[0]);
-                const T k_1 = layer_ad.getK(T_old[1]);
+                const T k_0 = layers_ad[0].getK(T_old[0]);
+                const T k_1 = layers_ad[0].getK(T_old[1]);
                 const T k_avg = 2.0*k_0*k_1/(k_0 + k_1);
 
                 const double rdx = 1.0/dx;
@@ -548,8 +601,8 @@ public:
                 const double T_inf = left_boundary.value1;
                 const double epsilon = left_boundary.value3;
                 
-                const T k_0 = layer_ad.getK(T_old[0]);
-                const T k_1 = layer_ad.getK(T_old[1]);
+                const T k_0 = layers_ad[0].getK(T_old[0]);
+                const T k_1 = layers_ad[0].getK(T_old[1]);
                 const T k_avg = 2.0*k_0*k_1/(k_0 + k_1);
                 
                 // 转换为绝对温度
@@ -580,7 +633,7 @@ public:
     ) 
     {   
         int n = total_nodes - 1;    
-        const T rhoCp = layer_ad.density*layer_ad.getCp(T_old[n]);
+        const T rhoCp = layers_ad[0].density*layers_ad[0].getCp(T_old[n]);
         const T diag = 0.5*rhoCp/dt;    
         switch (right_boundary.type) 
         {
@@ -595,8 +648,8 @@ public:
             case BoundaryType::FIXED_HEAT_FLUX: 
             {
                 const double q = right_boundary.value1;
-                const T k_n = layer_ad.getK(T_old[n]);
-                const T k_n_1 = layer_ad.getK(T_old[n-1]);
+                const T k_n = layers_ad[0].getK(T_old[n]);
+                const T k_n_1 = layers_ad[0].getK(T_old[n-1]);
                 const T k_avg = 2.0*k_n*k_n_1/(k_n + k_n_1);
 
                 const double rdx = 1.0/dx;
@@ -612,8 +665,8 @@ public:
                 const double h = right_boundary.value2;
                 const double T_inf = right_boundary.value1;
 
-                const T k_n = layer_ad.getK(T_old[n]);
-                const T k_n_1 = layer_ad.getK(T_old[n-1]);
+                const T k_n = layers_ad[0].getK(T_old[n]);
+                const T k_n_1 = layers_ad[0].getK(T_old[n-1]);
                 const T k_avg = 2.0*k_n*k_n_1/(k_n + k_n_1);
 
                 const double rdx = 1.0/dx;
@@ -631,8 +684,8 @@ public:
                 const double T_inf = right_boundary.value1;
                 const double epsilon = right_boundary.value3;
                 
-                const T k_n = layer_ad.getK(T_old[n]);
-                const T k_n_1 = layer_ad.getK(T_old[n-1]);
+                const T k_n = layers_ad[0].getK(T_old[n]);
+                const T k_n_1 = layers_ad[0].getK(T_old[n-1]);
                 const T k_avg = 2.0*k_n*k_n_1/(k_n + k_n_1);
                 
                 // 转换为绝对温度
@@ -665,6 +718,20 @@ public:
     {
         applyLeftBoundary(T_old);
         applyRightBoundary(T_old);
+    }
+
+    inline void correctRad
+    (
+        std::vector<T>& D, 
+        std::vector<T>& S,
+        const std::vector<T>& temperature
+    )
+    {
+        if(this->model == radiationModel::DISCRETE_ORDINATE_METHOD)
+        {
+            this->radiation_solver->solve();
+            this->radiation_solver->correct(D, S, temperature);
+        }
     }
 
     // TDMA算法求解三对角方程组
@@ -700,7 +767,7 @@ public:
         {
             const T k_left = getInterfaceConductivity(temperature[i-1], temperature[i]);
             const T k_right = getInterfaceConductivity(temperature[i], temperature[i+1]);
-            const T rhoCp = layer_ad.density*layer_ad.getCp(temperature[i]);
+            const T rhoCp = layers_ad[0].density*layers_ad[0].getCp(temperature[i]);
             const T diag = rhoCp/dt;
             const double rdx2 = 1.0/(dx*dx);
             const T u_left = k_left*rdx2;
@@ -713,11 +780,39 @@ public:
         }
         // 应用边界条件
         applyBoundaryCondition(temperature);
-            
+        
+        // 添加辐射
+        correctRad(D, S, temperature);
+
         // 求解方程组
         solveTDMA(temperature);
     }
     
+    virtual double getLeftEmissivity() const override
+    {
+        return left_boundary.value3;
+    }
+
+    virtual double getRightEmissivity() const override
+    {
+        return right_boundary.value3;
+    }
+
+    virtual double getDx(int index) const override
+    {
+        return dx;
+    }
+
+    virtual T getExtinction(int index) const override
+    {
+        return layers_ad[0].getExtinction(temperature[index]);
+    }
+
+    virtual T getAlbedo(int index) const override
+    {
+        return layers_ad[0].getAlbedo(temperature[index]);
+    }
+
     // 运行正演模型计算残差
     virtual void computeResiduals(std::vector<T>& residuals) override
     {
@@ -772,7 +867,7 @@ public:
     {
         if(param_index == 0)
         {
-            std::vector<T>& k_vals = layer_ad.thermal_conductivity.getValues();
+            std::vector<T>& k_vals = layers_ad[0].thermal_conductivity.getValues();
         
             size_t k_count = k_vals.size();
             for (size_t i = 0; i < k_count; ++i) 
@@ -782,10 +877,10 @@ public:
         }
         else if(param_index == 1)
         {
-            std::vector<T>& cp_vals = layer_ad.specific_heat.getValues();
-            for (size_t i = 0; i < cp_vals.size(); ++i) 
+            std::vector<T>& beta_vals = layers_ad[0].extinction.getValues();
+            for (size_t i = 0; i < beta_vals.size(); ++i) 
             {
-                cp_vals[i] = parameters[i];
+                beta_vals[i] = parameters[i];
             }
         }
     }
